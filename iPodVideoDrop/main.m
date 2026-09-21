@@ -232,17 +232,21 @@
     BOOL ok=[self run:ffprobe
                  args:@[@"-v",@"error",
                         @"-select_streams",@"v:0",
-                        @"-show_entries",@"stream=width,height",
-                        @"-of",@"csv=p=0:s=x", input]
+                        @"-show_entries",@"stream=width,height:stream_side_data=rotation:stream_tags=rotate",
+                        @"-of",@"default=nw=1", input]
                output:&probeOutput];
     if(!ok) return NO;
 
-    NSString *s=[probeOutput stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    NSArray<NSString*> *parts=[s componentsSeparatedByString:@"x"];
-    if(parts.count!=2) return NO;
-
-    NSInteger width=parts[0].integerValue;
-    NSInteger height=parts[1].integerValue;
+    // Phone clips are usually stored landscape with a 90° rotation flag; FFmpeg
+    // applies that rotation while decoding, so judge by the displayed size.
+    NSInteger width=0, height=0, rotation=0;
+    for(NSString *line in [probeOutput componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]){
+        if([line hasPrefix:@"width="]) width=[line substringFromIndex:6].integerValue;
+        else if([line hasPrefix:@"height="]) height=[line substringFromIndex:7].integerValue;
+        else if([line hasPrefix:@"rotation="]) rotation=[line substringFromIndex:9].integerValue;
+        else if([line hasPrefix:@"TAG:rotate="] && rotation==0) rotation=[line substringFromIndex:11].integerValue;
+    }
+    if(labs(rotation)%180==90){ NSInteger t=width; width=height; height=t; }
     return width>0 && height>width;
 }
 
@@ -305,7 +309,6 @@
             NSString *out=[base stringByAppendingString:@"_iPod.m4v"];
             NSString *tmp=[base stringByAppendingString:@"_iPod.tmp.m4v"];
             [fm removeItemAtPath:tmp error:nil];
-            [fm removeItemAtPath:out error:nil];
 
             NSString *diagnostic=nil;
             BOOL ok=[self run:[self tool:@"ffmpeg"] args:[self ffmpegArgsForInput:u.path output:tmp] output:&diagnostic];
@@ -315,7 +318,9 @@
                 if(!ok) diagnostic=metaError;
             }
             if(ok){
+                // Replace an earlier _iPod.m4v only once the new one is complete.
                 NSError *moveError=nil;
+                [fm removeItemAtPath:out error:nil];
                 ok=[fm moveItemAtPath:tmp toPath:out error:&moveError];
                 if(!ok) diagnostic=moveError.localizedDescription;
             }

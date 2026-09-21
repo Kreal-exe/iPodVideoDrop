@@ -4,3 +4,4 @@
 *.m4v
 .DS_Store
 __MACOSX/
+dist/
